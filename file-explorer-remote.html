@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20viewBox%3D%270%200%2032%2032%27%3E%3Crect%20width%3D%2732%27%20height%3D%2732%27%20rx%3D%277%27%20fill%3D%27%2315181b%27/%3E%3Cpath%20d%3D%27M6%2012a2%202%200%200%201%202-2h5l2%202h9a2%202%200%200%201%202%202v8a2%202%200%200%201-2%202H8a2%202%200%200%201-2-2z%27%20fill%3D%27%23e1a34f%27/%3E%3C/svg%3E">
 <title>Files</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
@@ -146,10 +147,6 @@ select#sortKey{
 .summary b{ color:var(--text); font-weight:500; }
 .upload-group{ display:flex; gap:6px; }
 
-.upload-progress{ height:2px; background:var(--border); flex-shrink:0; display:none; }
-.upload-progress.show{ display:block; }
-.upload-progress-bar{ height:100%; width:0%; background:var(--accent); transition:width .1s linear; }
-
 /* ---------- Main content ---------- */
 main{ flex:1; overflow-y:auto; padding:18px; }
 
@@ -284,32 +281,45 @@ td.action-cell, th.action-th{ width:36px; text-align:center; }
   box-shadow:0 20px 60px rgba(0,0,0,0.45);
 }
 .player-header{
-  display:flex; align-items:center; justify-content:space-between;
+  display:flex; align-items:center; justify-content:space-between; gap:10px;
   padding:10px 14px; border-bottom:1px solid var(--border);
 }
-.player-title{ font-size:12.5px; color:var(--text-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.player-header-actions{ display:flex; gap:6px; flex-shrink:0; }
+.player-title{ font-size:12.5px; color:var(--text-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; min-width:0; }
 .player-body{ background:#000; }
-.player-body video{ display:block; width:100%; max-height:70vh; background:#000; }
+.player-body video{ display:block; width:100%; max-height:70vh; background:#000; outline:none; }
 .player-body.audio-mode{
-  background:var(--panel); padding:32px 28px; display:flex; flex-direction:column;
-  align-items:center; gap:16px;
+  background:var(--panel); padding:28px; display:flex; gap:28px;
+  align-items:flex-start; justify-content:center;
 }
-.player-body.audio-mode svg{ width:40px; height:40px; color:#b98fc9; opacity:.85; }
-.player-body.audio-mode .audio-name{ font-size:13.5px; color:var(--text); }
-.player-body.audio-mode audio{ width:100%; }
+.audio-visual{ display:flex; flex-direction:column; align-items:center; gap:14px; flex-shrink:0; width:200px; }
+.audio-icon-fallback{
+  width:120px; height:120px; border-radius:8px; background:var(--panel-alt);
+  display:flex; align-items:center; justify-content:center;
+}
+.audio-icon-fallback svg{ width:40px; height:40px; color:#b98fc9; opacity:.85; }
+.audio-artwork{ width:180px; height:180px; object-fit:cover; border-radius:8px; background:var(--panel-alt); }
+.audio-name{ font-size:13.5px; color:var(--text); text-align:center; word-break:break-word; }
+.audio-visual audio{ width:100%; outline:none; }
+.audio-lyrics{
+  width:280px; max-height:min(50vh, 380px); overflow-y:auto;
+  font-size:13px; line-height:1.7; color:var(--text-dim); white-space:pre-wrap;
+  padding:2px 0 2px 20px; border-left:1px solid var(--border);
+}
 
-/* CSS-only "maximize" fallback for when the real Fullscreen API is blocked
-   (e.g. a gamepad press outside the browser's gesture-activation window) —
-   fills the viewport with the video regardless of that permission check. */
-.player-overlay.maximized{ padding:0; }
-.player-overlay.maximized .player-panel{
-  max-width:none; width:100%; height:100%; border-radius:0;
-  display:flex; flex-direction:column;
+/* ---- Resume-watching prompt (video only) ---- */
+.player-body.resume-mode{
+  background:var(--panel); padding:40px 28px; display:flex; flex-direction:column;
+  align-items:center; gap:14px; text-align:center;
 }
-.player-overlay.maximized .player-body{ flex:1; min-height:0; display:flex; }
-.player-overlay.maximized .player-body video{
-  width:100%; height:100%; max-height:none; object-fit:contain; margin:auto;
+.resume-title{ font-size:14px; color:var(--text); font-weight:500; }
+.resume-sub{ font-size:13px; color:var(--text-dim); }
+.resume-actions{ display:flex; gap:10px; margin-top:6px; }
+.btn-secondary{
+  background:none; border:1px solid var(--border); color:var(--text);
+  padding:6px 14px; border-radius:5px; font-family:'IBM Plex Sans'; font-size:13px; cursor:pointer;
 }
+.btn-secondary:hover{ background:var(--panel-alt); }
 
 .player-body.image-mode{ background:#000; }
 .viewer-stage{ position:relative; display:flex; align-items:center; justify-content:center; min-height:200px; }
@@ -396,6 +406,25 @@ td.action-cell, th.action-th{ width:36px; text-align:center; }
 }
 .controller-toast.show{ opacity:1; }
 
+/* ---- Status toast: upload progress, "zipping…" wait — anything that needs
+   to stay visible for an indeterminate duration rather than auto-dismiss ---- */
+.status-toast{
+  position:fixed; top:16px; left:50%; transform:translateX(-50%);
+  background:var(--panel); border:1px solid var(--border); border-radius:8px;
+  padding:10px 16px; font-size:13px; color:var(--text); z-index:80;
+  box-shadow:0 10px 30px rgba(0,0,0,0.4);
+  display:none; flex-direction:column; gap:8px; min-width:200px;
+}
+.status-toast.show{ display:flex; }
+.status-toast-row{ display:flex; align-items:center; gap:10px; }
+.status-toast .spinner{
+  width:14px; height:14px; border:2px solid var(--border); border-top-color:var(--accent);
+  border-radius:50%; animation:status-spin .7s linear infinite; flex-shrink:0;
+}
+@keyframes status-spin{ to{ transform:rotate(360deg); } }
+.status-toast-bar-track{ height:4px; background:var(--panel-alt); border-radius:2px; overflow:hidden; }
+.status-toast-bar-fill{ height:100%; width:0%; background:var(--accent); transition:width .1s linear; }
+
 @media (max-width: 640px){
   #search{ width:120px; }
   .summary{ display:none; }
@@ -409,6 +438,10 @@ td.action-cell, th.action-th{ width:36px; text-align:center; }
     padding-bottom: env(safe-area-inset-bottom);
   }
   .editor-panel{ height:100dvh; }
+
+  /* Side-by-side artwork+lyrics doesn't fit a phone width — stack instead. */
+  .player-body.audio-mode{ flex-direction:column; align-items:center; overflow-y:auto; }
+  .audio-lyrics{ width:100%; max-width:280px; border-left:none; border-top:1px solid var(--border); padding:14px 0 0; }
 }
 
 /* scrollbar */
@@ -468,8 +501,6 @@ main::-webkit-scrollbar-thumb{ background:var(--panel-alt); border-radius:5px; b
     <div class="summary" id="summary"></div>
   </div>
 
-  <div class="upload-progress" id="uploadProgress"><div class="upload-progress-bar" id="uploadProgressBar"></div></div>
-
   <main id="main"></main>
 </div>
 
@@ -477,9 +508,17 @@ main::-webkit-scrollbar-thumb{ background:var(--panel-alt); border-radius:5px; b
   <div class="player-panel">
     <div class="player-header">
       <span class="player-title mono" id="playerTitle"></span>
-      <button class="nav-btn" id="playerClose" title="Close">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
-      </button>
+      <div class="player-header-actions">
+        <button class="nav-btn" id="playerPrev" title="Previous">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 20 9 12l10-8v16Z"/><path d="M5 19V5"/></svg>
+        </button>
+        <button class="nav-btn" id="playerNext" title="Next">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 4l10 8-10 8V4Z"/><path d="M19 5v14"/></svg>
+        </button>
+        <button class="nav-btn" id="playerClose" title="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
     </div>
     <div class="player-body" id="playerBody"></div>
   </div>
@@ -522,6 +561,10 @@ main::-webkit-scrollbar-thumb{ background:var(--panel-alt); border-radius:5px; b
       <div class="help-row"><span class="help-key">Backspace</span><span class="help-desc">Up one folder / close a dialog</span></div>
       <div class="help-row"><span class="help-key">/</span><span class="help-desc">Jump to search</span></div>
       <div class="help-row"><span class="help-key">G / L</span><span class="help-desc">Grid view / list view</span></div>
+      <div class="help-row"><span class="help-key">Space</span><span class="help-desc">Play / pause (in video/audio player)</span></div>
+      <div class="help-row"><span class="help-key">← →</span><span class="help-desc">Seek 5s (in video/audio player) / prev-next image</span></div>
+      <div class="help-row"><span class="help-key">F</span><span class="help-desc">Toggle fullscreen (in video player)</span></div>
+      <div class="help-row"><span class="help-key">L</span><span class="help-desc">Play next (in video/audio player)</span></div>
       <div class="help-row"><span class="help-key">Esc</span><span class="help-desc">Close a dialog</span></div>
     </div>
     <div class="help-section">
@@ -549,10 +592,24 @@ main::-webkit-scrollbar-thumb{ background:var(--panel-alt); border-radius:5px; b
       <div class="help-row"><span class="help-key">B</span><span class="help-desc">Close the viewer</span></div>
       <div class="help-row"><span class="help-key">everything else</span><span class="help-desc">Ignored while viewing</span></div>
     </div>
+    <div class="help-section">
+      <h3>Resuming a video</h3>
+      <div class="help-row"><span class="help-key">D-pad / ← →</span><span class="help-desc">Choose Resume or Start over</span></div>
+      <div class="help-row"><span class="help-key">A / Enter</span><span class="help-desc">Confirm the highlighted choice</span></div>
+    </div>
   </div>
 </div>
 
 <div class="controller-toast" id="controllerToast"></div>
+<div class="status-toast" id="statusToast">
+  <div class="status-toast-row">
+    <span class="spinner" id="statusToastSpinner"></span>
+    <span id="statusToastText"></span>
+  </div>
+  <div class="status-toast-bar-track" id="statusToastBarTrack" style="display:none;">
+    <div class="status-toast-bar-fill" id="statusToastBarFill"></div>
+  </div>
+</div>
 
 <script>
 /* =========================================================================
@@ -600,6 +657,37 @@ const FileServerAPI = {
       throw new Error(body.error || `Server returned ${res.status}`);
     }
   },
+  async getProgress(pathParts) {
+    const res = await fetch(`/api/progress?path=${encodeURIComponent(pathParts.join('/'))}`);
+    if (!res.ok) return null;
+    const data = await res.json().catch(() => null);
+    return (data && typeof data.position === 'number') ? data : null;
+  },
+  async getLyrics(pathParts) {
+    const res = await fetch(`/api/lyrics?path=${encodeURIComponent(pathParts.join('/'))}`);
+    if (!res.ok) return '';
+    return res.text();
+  },
+  async saveProgress(pathParts, position, duration) {
+    try {
+      await fetch('/api/progress', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: pathParts.join('/'), position, duration }),
+      });
+    } catch (err) { /* best-effort — losing a progress update isn't worth surfacing */ }
+  },
+  saveProgressOnUnload(pathParts, position, duration) {
+    // navigator.sendBeacon is built for exactly this: fire it on the way out
+    // (closing the player, or the tab itself) without depending on the page
+    // sticking around long enough for a normal fetch to complete.
+    const payload = JSON.stringify({ path: pathParts.join('/'), position, duration });
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon('/api/progress', new Blob([payload], { type: 'application/json' }));
+    } else {
+      fetch('/api/progress', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload, keepalive: true }).catch(() => {});
+    }
+  },
 };
 
 
@@ -616,6 +704,13 @@ function humanSize(bytes) {
 function humanDate(iso) {
   const d = new Date(iso);
   return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+function formatTime(totalSeconds) {
+  const s = Math.floor(totalSeconds % 60).toString().padStart(2, '0');
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const m = (totalMinutes % 60).toString().padStart(2, '0');
+  const h = Math.floor(totalMinutes / 60);
+  return h > 0 ? `${h}:${m}:${s}` : `${totalMinutes}:${s}`;
 }
 
 /* =========================================================================
@@ -713,6 +808,9 @@ function iconMarkup(entry, small = false) {
         ${ICONS.folder}
       </div>`;
   }
+  if (entry.artwork) {
+    return `<div class="file-icon" style="background-image:url('${entry.artwork}');background-size:cover;background-position:center;"></div>`;
+  }
   const kind = entry.isImage ? 'image' : fileIconType(entry.name);
   if (entry.isImage && entry.thumb) {
     return `<div class="file-icon image" style="background-image:url('${entry.thumb}');background-size:cover;background-position:center;">${ICONS.image}</div>`;
@@ -745,13 +843,44 @@ function openEntry(entry) {
   else if (isTextEditable(entry.name)) openEditor(entry);
 }
 
-function downloadEntry(entry) {
+function triggerDownload(url) {
   const a = document.createElement('a');
-  a.href = entry.downloadUrl;
+  a.href = url;
   a.download = '';
   document.body.appendChild(a);
   a.click();
   a.remove();
+}
+
+function downloadEntry(entry) {
+  if (entry.type !== 'dir') { triggerDownload(entry.downloadUrl); return; }
+  downloadFolderWithProgress(entry);
+}
+
+function downloadFolderWithProgress(entry) {
+  // Building the zip happens entirely server-side before any bytes are
+  // sent, so a plain click gives no feedback for however long that takes.
+  // A short-lived token round-tripped as a cookie tells us the moment the
+  // zip is actually ready, without needing to buffer the whole download
+  // in JS memory just to track progress (which would be a real problem
+  // for a multi-GB folder) — the browser still handles the actual file
+  // transfer itself, same as any other download.
+  const token = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  const url = `${entry.downloadUrl}&dltoken=${token}`;
+  showStatusToast(`Zipping "${entry.name}"…`);
+  triggerDownload(url);
+
+  const cookieName = 'fileDownloadToken';
+  const started = Date.now();
+  const MAX_WAIT_MS = 5 * 60 * 1000; // large folders can legitimately take a while
+  const poll = setInterval(() => {
+    const done = document.cookie.split('; ').includes(`${cookieName}=${token}`);
+    if (done || Date.now() - started > MAX_WAIT_MS) {
+      clearInterval(poll);
+      hideStatusToast();
+      document.cookie = `${cookieName}=; Max-Age=0; path=/`;
+    }
+  }, 300);
 }
 
 let currentEntries = [];
@@ -938,42 +1067,171 @@ function restoreFocusAfterOverlay() {
   if (el) el.focus();
 }
 
-function openPlayer(entry) {
+/* If the resume-or-restart prompt is on screen and the player gets closed
+   out from under it (Escape, B, backdrop click) instead of an explicit
+   choice, resolve its promise so openPlayer's await doesn't hang forever. */
+let pendingResumeResolve = null;
+
+function askResume(name, position) {
+  return new Promise((resolve) => {
+    pendingResumeResolve = resolve;
+    playerBody.className = 'player-body resume-mode';
+    playerBody.innerHTML = `
+      <div class="resume-prompt">
+        <div class="resume-title">${escapeHtml(name)}</div>
+        <div class="resume-sub">You left off at ${formatTime(position)}</div>
+        <div class="resume-actions">
+          <button class="save-btn" id="resumeBtn">Resume</button>
+          <button class="btn-secondary" id="restartBtn">Start over</button>
+        </div>
+      </div>`;
+    const resumeBtn = document.getElementById('resumeBtn');
+    const restartBtn = document.getElementById('restartBtn');
+    resumeBtn.addEventListener('click', () => { pendingResumeResolve = null; resolve('resume'); });
+    restartBtn.addEventListener('click', () => { pendingResumeResolve = null; resolve('restart'); });
+    resumeBtn.focus();
+  });
+}
+
+const PROGRESS_SAVE_INTERVAL = 8; // seconds of playback between periodic saves
+function trackProgress(video, pathParts) {
+  let lastSaved = 0;
+  const save = () => {
+    if (!Number.isFinite(video.duration)) return;
+    FileServerAPI.saveProgress(pathParts, video.currentTime, video.duration);
+  };
+  video.addEventListener('timeupdate', () => {
+    if (video.currentTime - lastSaved >= PROGRESS_SAVE_INTERVAL) {
+      lastSaved = video.currentTime;
+      save();
+    }
+  });
+  video.addEventListener('ended', save);
+  // Exposed so closePlayer can force one last save with sendBeacon before
+  // the element (and any pending 'pause'/'timeupdate' handling) is torn down.
+  video._saveProgressOnClose = () => {
+    if (!Number.isFinite(video.duration)) return;
+    FileServerAPI.saveProgressOnUnload(pathParts, video.currentTime, video.duration);
+  };
+}
+
+/* Play next/previous: whichever files of the same kind (video or audio)
+   are currently visible in this folder, in the order they're displayed —
+   respecting whatever sort/filter is active, not raw directory order. */
+let activePlaylist = [];
+let activePlaylistIndex = -1;
+
+function playlistFor(entry) {
+  const isVideo = isVideoFile(entry.name);
+  return sortedFilteredEntries(currentEntries).filter(e =>
+    e.type === 'file' && (isVideo ? isVideoFile(e.name) : isAudioFile(e.name))
+  );
+}
+function updatePlaylistButtons() {
+  const prevBtn = document.getElementById('playerPrev');
+  const nextBtn = document.getElementById('playerNext');
+  const show = activePlaylist.length > 1;
+  prevBtn.style.display = show ? '' : 'none';
+  nextBtn.style.display = show ? '' : 'none';
+  if (show) {
+    prevBtn.disabled = activePlaylistIndex <= 0;
+    nextBtn.disabled = activePlaylistIndex >= activePlaylist.length - 1;
+  }
+}
+function playAdjacent(delta) {
+  if (activePlaylist.length === 0) return;
+  const newIndex = activePlaylistIndex + delta;
+  if (newIndex < 0 || newIndex >= activePlaylist.length) return; // no wraparound
+  openPlayer(activePlaylist[newIndex]);
+}
+function wireAutoAdvance(media) {
+  media.addEventListener('ended', () => playAdjacent(1));
+}
+document.getElementById('playerPrev').addEventListener('click', () => playAdjacent(-1));
+document.getElementById('playerNext').addEventListener('click', () => playAdjacent(1));
+
+async function openPlayer(entry) {
   returnFocusName = entry.name;
   playerTitle.textContent = entry.name;
+  playerBody.className = 'player-body';
+  playerBody.innerHTML = '';
+  document.getElementById('playerPrev').style.display = 'none';
+  document.getElementById('playerNext').style.display = 'none';
+  playerOverlay.classList.add('show');
+
+  activePlaylist = playlistFor(entry);
+  activePlaylistIndex = activePlaylist.findIndex(e => e.name === entry.name);
 
   if (isVideoFile(entry.name)) {
+    const pathParts = [...state.path, entry.name];
+    let resumeAt = 0;
+
+    const progress = await FileServerAPI.getProgress(pathParts).catch(() => null);
+    if (progress && progress.position > 0) {
+      const choice = await askResume(entry.name, progress.position);
+      if (choice !== 'resume' && choice !== 'restart') return; // dialog was closed out from under it
+      if (choice === 'resume') resumeAt = progress.position;
+    }
+
     playerBody.className = 'player-body';
     playerBody.innerHTML = `<video controls autoplay src="${escapeAttr(entry.url || '')}"></video>`;
     // No playsinline attribute here on purpose — that's what lets iOS Safari's
     // own automatic fullscreen-on-play behavior keep working. For browsers
     // that don't do this natively (notably Firefox on Android), ask for
     // fullscreen ourselves once playback actually starts.
-    requestVideoFullscreen(playerBody.querySelector('video'));
+    const video = playerBody.querySelector('video');
+    if (resumeAt > 0) {
+      video.addEventListener('loadedmetadata', () => { video.currentTime = resumeAt; }, { once: true });
+    }
+    requestVideoFullscreen(video);
+    // The native Space (pause) / arrow-key (seek) shortcuts only fire when
+    // the <video> element itself has focus — without this, they silently
+    // do nothing until the person clicks the video by hand.
+    video.focus();
+    trackProgress(video, pathParts);
+    wireAutoAdvance(video);
   } else {
-    playerBody.className = 'player-body audio-mode';
-    playerBody.innerHTML = `
-      ${ICONS.audio}
-      <div class="audio-name">${escapeHtml(entry.name)}</div>
-      <audio controls autoplay src="${escapeAttr(entry.url || '')}"></audio>`;
+    await setupAudioPlayer(entry);
+    wireAutoAdvance(playerBody.querySelector('audio'));
   }
-  playerOverlay.classList.add('show');
+  updatePlaylistButtons();
+}
+
+async function setupAudioPlayer(entry) {
+  playerBody.className = 'player-body audio-mode';
+  const visualHtml = entry.artwork
+    ? `<img class="audio-artwork" src="${escapeAttr(entry.artwork)}" alt="Album artwork">`
+    : `<div class="audio-icon-fallback">${ICONS.audio}</div>`;
+
+  playerBody.innerHTML = `
+    <div class="audio-visual">
+      ${visualHtml}
+      <div class="audio-name">${escapeHtml(entry.name)}</div>
+      <audio controls autoplay src="${escapeAttr(entry.url || '')}"></audio>
+    </div>
+    ${entry.hasLyrics ? `<div class="audio-lyrics" id="audioLyrics">Loading lyrics…</div>` : ''}`;
+  playerBody.querySelector('audio').focus();
+
+  if (entry.hasLyrics) {
+    const lyrics = await FileServerAPI.getLyrics([...state.path, entry.name]).catch(() => '');
+    const el = document.getElementById('audioLyrics');
+    if (el) el.textContent = lyrics || 'No lyrics found.';
+  }
 }
 
 function requestVideoFullscreen(video) {
   if (!video) return;
-  video.addEventListener('play', () => enterMaximized(video), { once: true });
+  video.addEventListener('play', () => enterFullscreen(video), { once: true });
 }
 function enterFullscreen(el) {
   const req = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen;
   if (!req) return;
   try {
-    // Browsers that gate fullscreen behind a genuine *recent* user gesture
-    // will reject this quietly once that gesture's activation window has
-    // expired — e.g. a gamepad press some time after the last touch/click
-    // (gamepad input itself never counts as a qualifying gesture at all).
-    // That's a platform limitation, not something worth surfacing as an
-    // error — enterMaximized()'s CSS fallback below covers the gap.
+    // Browsers that gate fullscreen behind a genuine recent user gesture will
+    // reject this quietly once that gesture's activation window has expired
+    // — e.g. a gamepad press some time after the last touch/click (gamepad
+    // input itself never counts as a qualifying gesture at all). That's a
+    // platform limitation, not something worth surfacing as an error.
     const result = req.call(el);
     if (result && typeof result.catch === 'function') result.catch(() => {});
   } catch (err) { /* unsupported or blocked — ignore */ }
@@ -991,23 +1249,9 @@ function onceFullscreenChange(cb) {
   const handler = () => { events.forEach(evt => document.removeEventListener(evt, handler)); cb(); };
   events.forEach(evt => document.addEventListener(evt, handler));
 }
-
-/* "Maximized" is our own CSS-driven fallback, independent of the browser's
-   permission-gated Fullscreen API: it always fills the viewport with the
-   video, guaranteeing a consistent result regardless of gesture timing.
-   Native fullscreen (which additionally hides browser chrome) is still
-   requested alongside it on a best-effort basis. */
-function enterMaximized(video) {
-  playerOverlay.classList.add('maximized');
-  enterFullscreen(video);
-}
-function exitMaximized() {
-  playerOverlay.classList.remove('maximized');
-  exitFullscreenIfActive();
-}
-function toggleMaximized(video) {
-  if (playerOverlay.classList.contains('maximized')) exitMaximized();
-  else enterMaximized(video);
+function toggleFullscreen(el) {
+  if (document.fullscreenElement === el) exitFullscreenIfActive();
+  else enterFullscreen(el);
 }
 
 let viewerImages = [];
@@ -1018,6 +1262,8 @@ function visibleImageEntries() {
 }
 function openImageViewer(entry) {
   returnFocusName = entry.name;
+  document.getElementById('playerPrev').style.display = 'none';
+  document.getElementById('playerNext').style.display = 'none';
   viewerImages = visibleImageEntries();
   viewerIndex = viewerImages.findIndex(e => e.name === entry.name);
   renderViewerImage();
@@ -1046,12 +1292,17 @@ function stepViewer(delta) {
 }
 
 function closePlayer() {
+  if (pendingResumeResolve) { const r = pendingResumeResolve; pendingResumeResolve = null; r('cancel'); }
+
   const media = playerBody.querySelector('video, audio');
-  if (media) media.pause();
+  if (media) {
+    media.pause();
+    if (typeof media._saveProgressOnClose === 'function') media._saveProgressOnClose();
+  }
 
   const finishClose = () => {
     if (media) { media.removeAttribute('src'); media.load(); }
-    playerOverlay.classList.remove('show', 'maximized');
+    playerOverlay.classList.remove('show');
     playerBody.innerHTML = '';
     playerBody.className = 'player-body';
     restoreFocusAfterOverlay();
@@ -1070,6 +1321,10 @@ function closePlayer() {
 }
 document.getElementById('playerClose').addEventListener('click', closePlayer);
 playerOverlay.addEventListener('click', (e) => { if (e.target === playerOverlay) closePlayer(); });
+window.addEventListener('beforeunload', () => {
+  const media = playerBody.querySelector('video, audio');
+  if (media && typeof media._saveProgressOnClose === 'function') media._saveProgressOnClose();
+});
 
 /* =========================================================================
    TEXT EDITOR (.txt / .md)
@@ -1156,22 +1411,23 @@ function handleUpload(fileList, isFolder) {
     });
 }
 function uploadWithProgress(formData) {
-  const wrap = document.getElementById('uploadProgress');
-  const bar = document.getElementById('uploadProgressBar');
-  wrap.classList.add('show');
-  bar.style.width = '0%';
+  showStatusToast('Uploading… 0%', { determinate: true });
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/upload');
     xhr.upload.addEventListener('progress', (e) => {
-      if (e.lengthComputable) bar.style.width = `${(e.loaded / e.total) * 100}%`;
+      if (e.lengthComputable) {
+        const pct = Math.round((e.loaded / e.total) * 100);
+        setStatusToastProgress(e.loaded / e.total);
+        setStatusToastText(`Uploading… ${pct}%`);
+      }
     });
     xhr.addEventListener('load', () => {
-      wrap.classList.remove('show');
+      hideStatusToast();
       if (xhr.status >= 200 && xhr.status < 300) resolve();
       else reject(new Error(`Server returned ${xhr.status}`));
     });
-    xhr.addEventListener('error', () => { wrap.classList.remove('show'); reject(new Error('Network error')); });
+    xhr.addEventListener('error', () => { hideStatusToast(); reject(new Error('Network error')); });
     xhr.send(formData);
   });
 }
@@ -1288,6 +1544,40 @@ document.addEventListener('keydown', (e) => {
     if (playerBody.classList.contains('image-mode')) {
       if (e.key === 'ArrowLeft') stepViewer(-1);
       if (e.key === 'ArrowRight') stepViewer(1);
+      return;
+    }
+    if (playerBody.classList.contains('resume-mode')) {
+      // Enter/Space activate whichever button already has focus natively —
+      // just handle moving focus between the two choices here.
+      if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
+        e.preventDefault();
+        const resumeBtn = document.getElementById('resumeBtn');
+        const restartBtn = document.getElementById('restartBtn');
+        if (resumeBtn && restartBtn) (document.activeElement === resumeBtn ? restartBtn : resumeBtn).focus();
+      }
+      return;
+    }
+    // Video/audio playback: handled explicitly rather than leaning on the
+    // browser's native focus-dependent Space/Arrow media shortcuts, which
+    // depend on exactly which element has focus and turned out not to be
+    // reliable here — this way it works the same regardless of focus.
+    const media = playerBody.querySelector('video, audio');
+    if (media) {
+      if (e.key === ' ' || e.code === 'Space') {
+        e.preventDefault();
+        media.paused ? media.play().catch(() => {}) : media.pause();
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        media.currentTime = Math.max(0, media.currentTime - SEEK_SECONDS);
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        const dur = Number.isFinite(media.duration) ? media.duration : Infinity;
+        media.currentTime = Math.min(dur, media.currentTime + SEEK_SECONDS);
+      } else if ((e.key === 'f' || e.key === 'F') && media.tagName === 'VIDEO') {
+        toggleFullscreen(media); // no fullscreen concept for audio
+      } else if (e.key === 'l' || e.key === 'L') {
+        playAdjacent(1);
+      }
     }
     return;
   }
@@ -1335,15 +1625,58 @@ function showControllerToast(text) {
   showControllerToast._t = setTimeout(() => toast.classList.remove('show'), 2200);
 }
 
-window.addEventListener('gamepadconnected', (e) => {
-  gamepadIndex = e.gamepad.index;
-  showControllerToast(`Controller connected — Start for controls`);
+/* Status toast: for anything of indeterminate duration that a short
+   auto-dismissing toast (above) isn't suited for — upload progress, and
+   the "zipping…" wait before a folder download begins. */
+const statusToast = document.getElementById('statusToast');
+const statusToastText = document.getElementById('statusToastText');
+const statusToastSpinner = document.getElementById('statusToastSpinner');
+const statusToastBarTrack = document.getElementById('statusToastBarTrack');
+const statusToastBarFill = document.getElementById('statusToastBarFill');
+
+function showStatusToast(text, { determinate = false } = {}) {
+  statusToastText.textContent = text;
+  statusToastSpinner.style.display = determinate ? 'none' : '';
+  statusToastBarTrack.style.display = determinate ? '' : 'none';
+  if (determinate) statusToastBarFill.style.width = '0%';
+  statusToast.classList.add('show');
+}
+function setStatusToastText(text) { statusToastText.textContent = text; }
+function setStatusToastProgress(fraction) {
+  statusToastBarFill.style.width = `${Math.max(0, Math.min(100, fraction * 100))}%`;
+}
+function hideStatusToast() { statusToast.classList.remove('show'); }
+
+window.addEventListener('gamepadconnected', (e) => attachGamepad(e.gamepad.index));
+window.addEventListener('gamepaddisconnected', (e) => {
+  if (e.gamepad.index === gamepadIndex) {
+    gamepadIndex = null;
+    requestAnimationFrame(watchForGamepad); // resume watching for a reconnect or a different pad
+  }
+});
+
+function attachGamepad(index) {
+  if (gamepadIndex !== null) return; // already tracking one
+  gamepadIndex = index;
+  showControllerToast('Controller connected — Start for controls');
   focusFirstItemForFreshDirectory();
   requestAnimationFrame(pollGamepad);
-});
-window.addEventListener('gamepaddisconnected', (e) => {
-  if (e.gamepad.index === gamepadIndex) gamepadIndex = null;
-});
+}
+
+/* 'gamepadconnected' reliably fires for a controller plugged in *after* the
+   page loads, but browsers commonly don't fire it at all for one that was
+   already connected beforehand — a well-known Gamepad API gap, not
+   something specific to this page. Watching navigator.getGamepads()
+   directly catches that case too, without needing an unplug/replug. */
+function watchForGamepad() {
+  if (gamepadIndex !== null) return; // pollGamepad has taken over
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  for (const gp of pads) {
+    if (gp) { attachGamepad(gp.index); return; }
+  }
+  requestAnimationFrame(watchForGamepad);
+}
+requestAnimationFrame(watchForGamepad);
 
 function onGamepadButton(name) {
   switch (name) {
@@ -1372,6 +1705,16 @@ function handleGamepadInPlayer(buttonEdges, dirEdges) {
     return; // A, X, Y, L1/R1, Select, Start, Up/Down: ignored in the image viewer
   }
 
+  if (playerBody.classList.contains('resume-mode')) {
+    if (dirEdges.left || dirEdges.right || dirEdges.up || dirEdges.down) {
+      const resumeBtn = document.getElementById('resumeBtn');
+      const restartBtn = document.getElementById('restartBtn');
+      if (resumeBtn && restartBtn) (document.activeElement === resumeBtn ? restartBtn : resumeBtn).focus();
+    }
+    if (buttonEdges.A) activateFocused(); // clicks whichever of the two buttons is focused
+    return; // X, Y, L1/R1, Select, Start: ignored while choosing
+  }
+
   const media = playerBody.querySelector('video, audio');
   if (!media) return;
   if (buttonEdges.A) { media.paused ? media.play().catch(() => {}) : media.pause(); }
@@ -1380,7 +1723,7 @@ function handleGamepadInPlayer(buttonEdges, dirEdges) {
     const dur = Number.isFinite(media.duration) ? media.duration : Infinity;
     media.currentTime = Math.min(dur, media.currentTime + SEEK_SECONDS);
   }
-  if (dirEdges.up && media.tagName === 'VIDEO') toggleMaximized(media); // no fullscreen concept for audio
+  if (dirEdges.up && media.tagName === 'VIDEO') toggleFullscreen(media); // no fullscreen concept for audio
   // X, Y, L1/R1, Select, Start, Down: still ignored while a video/audio player is open
 }
 

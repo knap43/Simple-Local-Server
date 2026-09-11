@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
 File server backend for the mobile/controller-friendly file-explorer
-frontend (file-explorer-remote.html). This is a standalone copy of
-server.py's original companion, pointed at the alternate frontend file
-instead — the API surface is otherwise identical, so both frontends can
-talk to either backend if you ever want to mix and match.
+frontend (file-explorer-remote.html). Started as a standalone copy of
+server.py's companion, but now also tracks video watch progress — a
+feature specific to this frontend, so the two API surfaces have diverged
+here; everything else between them still matches.
 
 Serves the following from a single Flask process:
   - the frontend itself, at /
@@ -12,12 +12,27 @@ Serves the following from a single Flask process:
   - GET  /api/read?path=<rel>      -> raw text of a small text file (.txt/.md)
   - POST /api/write                -> save edited .txt/.md content
                                        (JSON body: {"path": ..., "content": ...})
+  - GET  /api/progress?path=<rel>  -> {"position": ..., "duration": ...} for
+                                       a video, or {} if nothing's saved
+  - POST /api/progress             -> save watch position (JSON body:
+                                       {"path": ..., "position": ..., "duration": ...});
+                                       video only, one shared store — not
+                                       scoped to any device or account
+  - DELETE /api/progress?path=<rel> -> clear saved progress for a video
   - GET  /api/thumbnail?path=<rel> -> a resized JPEG for an image file
   - GET  /api/image?path=<rel>     -> full-resolution image, for the viewer
+  - GET  /api/artwork?path=<rel>   -> embedded album art for an audio file,
+                                       if any (mp3/FLAC/M4A/OGG; not WAV)
+  - GET  /api/lyrics?path=<rel>    -> embedded lyrics text for an audio
+                                       file, if any (same format support)
   - GET  /api/stream?path=<rel>    -> range-request-capable file stream,
                                        for the built-in audio/video player
   - GET  /api/download?path=<rel>  -> the file itself, or a folder zipped
-                                       on the fly, as an attachment
+                                       on the fly, as an attachment. An
+                                       optional &dltoken=<id> is echoed back
+                                       as a cookie once the zip is ready, so
+                                       the frontend knows when to stop
+                                       showing its "zipping…" indicator
   - POST /api/upload                -> form fields: "path" (target dir) and
                                        one or more "files"; a folder upload's
                                        relative paths (webkitRelativePath)
@@ -39,12 +54,15 @@ forwarding a port to it. Pass --host 127.0.0.1 to restrict it to this
 machine only.
 
 Install (Arch, via pacman — matches what's already in the repos):
-    sudo pacman -S python-flask python-pillow
+    sudo pacman -S python-flask python-pillow python-mutagen
 
 Or via pip in a virtualenv (Arch's system Python is externally managed,
 so plain `pip install` will refuse to run outside one):
     python -m venv venv && source venv/bin/activate
-    pip install -r requirements.txt
+    pip install -r requirements-remote.txt
+
+Mutagen (album art / lyrics) and Pillow (thumbnails) are both optional —
+the server runs fine without either, just without those specific features.
 
 Run:
     python server.py /path/to/share
@@ -55,7 +73,10 @@ Run:
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
+import io
+import json
 import mimetypes
 import os
 import tempfile
@@ -73,11 +94,21 @@ try:
 except ImportError:
     Image = None  # thumbnails will fall back to serving the original file
 
+try:
+    from mutagen.id3 import ID3
+    from mutagen.flac import FLAC, Picture
+    from mutagen.mp4 import MP4
+    from mutagen.oggvorbis import OggVorbis
+    MUTAGEN_AVAILABLE = True
+except ImportError:
+    MUTAGEN_AVAILABLE = False  # album art / lyrics simply won't be offered
+
 # ---------------------------------------------------------------------------
 # Config (set in __main__ before app.run(); see configure())
 # ---------------------------------------------------------------------------
 ROOT_DIR: Path | None = None
 THUMB_DIR: Path | None = None
+PROGRESS_FILE_NAME = ".watch-progress.json"
 SIZE_CACHE_TTL = float(os.environ.get("FILESERVER_SIZE_CACHE_TTL", "60"))
 THUMB_MAX_SIZE = (320, 320)
 MAX_TEXT_BYTES = 2 * 1024 * 1024  # don't render anything bigger than 2 MB inline
@@ -97,6 +128,9 @@ app = Flask(__name__, static_folder=None)
 
 _size_cache: dict[str, tuple[int, float]] = {}
 _size_cache_lock = threading.Lock()
+_progress_lock = threading.Lock()
+_audio_meta_cache: dict[str, tuple[float, dict]] = {}
+_audio_meta_lock = threading.Lock()
 
 
 def configure(root: str | os.PathLike) -> None:
@@ -201,6 +235,124 @@ def invalidate_size_cache(path: Path) -> None:
             p = p.parent
 
 
+# ---------------------------------------------------------------------------
+# Watch progress — video only, one shared store (no per-device/account split)
+# ---------------------------------------------------------------------------
+def progress_file() -> Path:
+    return ROOT_DIR / PROGRESS_FILE_NAME
+
+
+def load_progress() -> dict:
+    path = progress_file()
+    with _progress_lock:
+        if not path.exists():
+            return {}
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}  # corrupt or unreadable — treat as empty rather than failing requests
+
+
+def save_progress_store(data: dict) -> None:
+    path = progress_file()
+    with _progress_lock:
+        try:
+            path.write_text(json.dumps(data), encoding="utf-8")
+        except OSError:
+            pass  # best-effort — a lost progress update isn't worth a 500
+
+
+# ---------------------------------------------------------------------------
+# Embedded album artwork + lyrics (audio files only)
+# ---------------------------------------------------------------------------
+def extract_artwork(path: Path) -> tuple[bytes | None, str]:
+    """Best-effort extraction of the first embedded cover image. Returns
+    (image_bytes, mimetype), or (None, "") if there's nothing to find or
+    Mutagen isn't installed. Format support: ID3 (mp3), FLAC, MP4/M4A, and
+    OGG Vorbis — WAV has no standard embedded-picture convention, so it's
+    left alone rather than guessed at."""
+    if not MUTAGEN_AVAILABLE:
+        return None, ""
+    ext = ext_of(path.name)
+    try:
+        if ext == ".mp3":
+            frames = ID3(path).getall("APIC")
+            if frames:
+                return frames[0].data, frames[0].mime or "image/jpeg"
+        elif ext == ".flac":
+            pictures = FLAC(path).pictures
+            if pictures:
+                return pictures[0].data, pictures[0].mime or "image/jpeg"
+        elif ext == ".m4a":
+            tags = MP4(path).tags
+            covers = tags.get("covr") if tags else None
+            if covers:
+                mime = "image/png" if covers[0].imageformat == covers[0].FORMAT_PNG else "image/jpeg"
+                return bytes(covers[0]), mime
+        elif ext == ".ogg":
+            audio = OggVorbis(path)
+            blocks = audio.get("metadata_block_picture")
+            if blocks:
+                pic = Picture(base64.b64decode(blocks[0]))
+                return pic.data, pic.mime or "image/jpeg"
+    except Exception:
+        pass  # corrupt tag, unexpected structure, etc — just report "no artwork"
+    return None, ""
+
+
+def extract_lyrics(path: Path) -> str | None:
+    """Best-effort extraction of embedded lyrics text. Same format support
+    and WAV caveat as extract_artwork above."""
+    if not MUTAGEN_AVAILABLE:
+        return None
+    ext = ext_of(path.name)
+    try:
+        if ext == ".mp3":
+            frames = ID3(path).getall("USLT")
+            if frames:
+                return frames[0].text
+        elif ext == ".flac":
+            audio = FLAC(path)
+            for key in ("lyrics", "unsyncedlyrics"):
+                if key in audio:
+                    return "\n".join(audio[key])
+        elif ext == ".m4a":
+            tags = MP4(path).tags
+            if tags and "\xa9lyr" in tags:
+                return "\n".join(tags["\xa9lyr"])
+        elif ext == ".ogg":
+            audio = OggVorbis(path)
+            for key in ("lyrics", "unsyncedlyrics"):
+                if key in audio:
+                    return "\n".join(audio[key])
+    except Exception:
+        pass
+    return None
+
+
+def get_audio_meta(path: Path) -> dict:
+    """{"has_artwork": bool, "has_lyrics": bool}, cached per file by mtime —
+    directory listings would otherwise re-parse every audio file's tags on
+    every single request, which adds up fast in a large music folder."""
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return {"has_artwork": False, "has_lyrics": False}
+
+    key = str(path)
+    with _audio_meta_lock:
+        cached = _audio_meta_cache.get(key)
+        if cached and cached[0] == mtime:
+            return cached[1]
+
+    data, _ = extract_artwork(path)
+    result = {"has_artwork": data is not None, "has_lyrics": bool(extract_lyrics(path))}
+
+    with _audio_meta_lock:
+        _audio_meta_cache[key] = (mtime, result)
+    return result
+
+
 def lan_addresses() -> list[str]:
     """Best-effort list of this machine's LAN IPs, just for a friendlier
     startup message when bound to 0.0.0.0 — not used for anything functional."""
@@ -262,7 +414,9 @@ def api_list():
             })
         else:
             is_image = ext_of(entry.name) in IMAGE_EXT
-            is_media = ext_of(entry.name) in AUDIO_EXT | VIDEO_EXT
+            is_audio = ext_of(entry.name) in AUDIO_EXT
+            is_media = is_audio or ext_of(entry.name) in VIDEO_EXT
+            audio_meta = get_audio_meta(entry_path) if is_audio else None
             items.append({
                 "name": entry.name,
                 "type": "file",
@@ -272,6 +426,8 @@ def api_list():
                 "thumb": thumb_url(rel) if is_image else None,
                 "url": image_url(rel) if is_image else (stream_url(rel) if is_media else None),
                 "downloadUrl": download_url(rel),
+                "artwork": artwork_url(rel) if (audio_meta and audio_meta["has_artwork"]) else None,
+                "hasLyrics": bool(audio_meta and audio_meta["has_lyrics"]),
             })
     return jsonify(items)
 
@@ -298,6 +454,10 @@ def image_url(rel: str) -> str:
 
 def download_url(rel: str) -> str:
     return f"/api/download?path={quote(rel)}"
+
+
+def artwork_url(rel: str) -> str:
+    return f"/api/artwork?path={quote(rel)}"
 
 
 @app.route("/api/read")
@@ -332,6 +492,61 @@ def api_write():
     return jsonify({"ok": True})
 
 
+@app.route("/api/progress")
+def api_get_progress():
+    """Return {"position": ..., "duration": ...} for a video, or {} if none
+    is stored. Video only — there's deliberately no equivalent for audio."""
+    target = safe_path(request.args.get("path", ""))
+    if ext_of(target.name) not in VIDEO_EXT:
+        abort(400, "Watch progress is only tracked for video files")
+    rel = target.relative_to(ROOT_DIR).as_posix()
+    return jsonify(load_progress().get(rel, {}))
+
+
+@app.route("/api/progress", methods=["POST"])
+def api_save_progress():
+    """Body: {"path": ..., "position": seconds, "duration": seconds}.
+    One shared store, not scoped to a device or account — whichever device
+    opens the video next sees whatever the last device saved."""
+    data = request.get_json(silent=True) or {}
+    target = safe_path(data.get("path", ""))
+    if ext_of(target.name) not in VIDEO_EXT:
+        abort(400, "Watch progress is only tracked for video files")
+
+    try:
+        position = float(data.get("position", 0))
+        duration = float(data.get("duration", 0))
+    except (TypeError, ValueError):
+        abort(400, "position/duration must be numbers")
+
+    rel = target.relative_to(ROOT_DIR).as_posix()
+    progress = load_progress()
+    # Not worth remembering the very start (nothing to resume) or the very
+    # end (functionally finished) of a video — drop those instead of storing
+    # a resume prompt that would be pointless the next time it's opened.
+    finished = duration > 0 and position >= duration * 0.95
+    if position <= 5 or finished:
+        progress.pop(rel, None)
+    else:
+        progress[rel] = {
+            "position": position,
+            "duration": duration,
+            "updated": datetime.now().isoformat(),
+        }
+    save_progress_store(progress)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/progress", methods=["DELETE"])
+def api_delete_progress():
+    target = safe_path(request.args.get("path", ""))
+    rel = target.relative_to(ROOT_DIR).as_posix()
+    progress = load_progress()
+    progress.pop(rel, None)
+    save_progress_store(progress)
+    return jsonify({"ok": True})
+
+
 @app.route("/api/thumbnail")
 def api_thumbnail():
     target = safe_path(request.args.get("path", ""))
@@ -355,6 +570,40 @@ def api_thumbnail():
             return send_file(target, conditional=True)
 
     return send_file(cache_path, conditional=True, mimetype="image/jpeg")
+
+
+@app.route("/api/artwork")
+def api_artwork():
+    target = safe_path(request.args.get("path", ""))
+    if not target.is_file() or ext_of(target.name) not in AUDIO_EXT:
+        abort(404)
+    data, mimetype = extract_artwork(target)
+    if data is None:
+        abort(404, "No embedded artwork found")
+    if Image is None:
+        return Response(data, mimetype=mimetype)
+    try:
+        # One size serves both the small grid/list icon and the player —
+        # 400px is plenty for either, so there's no need for two variants.
+        with Image.open(io.BytesIO(data)) as im:
+            im = im.convert("RGB")
+            im.thumbnail((400, 400))
+            buf = io.BytesIO()
+            im.save(buf, "JPEG", quality=85)
+            return Response(buf.getvalue(), mimetype="image/jpeg")
+    except Exception:
+        return Response(data, mimetype=mimetype)  # fall back to the original bytes as-is
+
+
+@app.route("/api/lyrics")
+def api_lyrics():
+    target = safe_path(request.args.get("path", ""))
+    if not target.is_file() or ext_of(target.name) not in AUDIO_EXT:
+        abort(404)
+    lyrics = extract_lyrics(target)
+    if not lyrics:
+        abort(404, "No embedded lyrics found")
+    return lyrics, 200, {"Content-Type": "text/plain; charset=utf-8"}
 
 
 @app.route("/api/stream")
@@ -461,7 +710,17 @@ def api_download():
         "Content-Type": "application/zip",
         "Content-Length": str(zip_size),
     }
-    return Response(stream_with_context(generate()), headers=headers)
+    response = Response(stream_with_context(generate()), headers=headers)
+
+    # The zip above is already fully built by this point — if the frontend
+    # passed a token, set it as a cookie now so its poll loop knows exactly
+    # when to stop showing "zipping…" and let the browser's own download
+    # progress take over, without us needing to report byte-level progress
+    # during the zip-building step itself.
+    dltoken = request.args.get("dltoken")
+    if dltoken:
+        response.set_cookie("fileDownloadToken", dltoken, max_age=60, path="/")
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -552,6 +811,9 @@ if __name__ == "__main__":
     if Image is None:
         print("Note: Pillow isn't installed — thumbnails will serve full-size originals. "
               "Install it (pacman -S python-pillow, or pip install Pillow) for resized, cached thumbnails.")
+    if not MUTAGEN_AVAILABLE:
+        print("Note: Mutagen isn't installed — album art and lyrics won't be available. "
+              "Install it (pacman -S python-mutagen, or pip install mutagen) to enable them.")
 
     print(f"Serving {ROOT_DIR}")
     print(f"  Local:   http://127.0.0.1:{args.port}")
