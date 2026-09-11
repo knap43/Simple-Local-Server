@@ -3,6 +3,9 @@ A home server with video and audio players, image viewer and text editor include
 
 Disclaimer: the code in its entirety was written by an LLM, use by your own discretion.
 
+### Demo:
+https://knap43.github.io/Simple-Local-Server/
+
 ### How to use:
 1. Clone the repo and cd into the folder
 2. Install the dependencies (on Arch: sudo pacman -S python-flask python-pillow)
